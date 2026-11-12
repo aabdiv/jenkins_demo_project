@@ -8,13 +8,14 @@ pipeline {
         DB_ENGINE    = 'sqlite'
     }
 
-    stage('Sanity check') {
-        steps {
-            input "Does the staging environment look ok?"
-        }
-    }
 
     stages {
+        stage('Sanity check') {
+            steps {
+                input "Does the staging environment look ok?"
+            }
+        }
+        
         stage('Build') {
             steps {
                 echo "Database engine is ${DB_ENGINE}"
