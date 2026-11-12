@@ -17,4 +17,13 @@ pipeline {
             }
         }
     }
+
+    post {
+        success {
+            mail to: 'vadios008@gmail.com',
+                subject: "success Pipeline: ${currentBuild.fullDisplayName}",
+                body: "Something is good with ${env.BUILD_URL}"
+        }
+    }
+
 }
