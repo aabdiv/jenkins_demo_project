@@ -42,20 +42,22 @@ pipeline {
                 '''
             }
         }
-        parallel {
-            stage('Lint') {
-                when {
-                    // != false, а не просто params.RUN_LINT: на самой первой сборке
-                    // параметр может быть ещё не зарегистрирован и прийти как null
-                    expression { params.RUN_LINT != false }
+        stage('Lint and Test') {
+            parallel {
+                stage('Lint') {
+                    when {
+                        // != false, а не просто params.RUN_LINT: на самой первой сборке
+                        // параметр может быть ещё не зарегистрирован и прийти как null
+                        expression { params.RUN_LINT != false }
+                    }
+                    steps {
+                        sh '.venv/bin/ruff check .'
+                    }
                 }
-                steps {
-                    sh '.venv/bin/ruff check .'
-                }
-            }
-            stage('Test') {
-                steps {
-                    sh '.venv/bin/python -m pytest -v --junitxml=reports/junit.xml'
+                stage('Test') {
+                    steps {
+                        sh '.venv/bin/python -m pytest -v --junitxml=reports/junit.xml'
+                    }
                 }
             }
         }
