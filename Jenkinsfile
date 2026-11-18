@@ -1,20 +1,14 @@
-// Учебный пайплайн: Checkout → Setup → Lint → Test для маленького FastAPI-сервиса.
-// Все шаги выполняются внутри контейнера python:3.12-slim, который Jenkins поднимает в dind.
+// Тот же пайплайн, но зависимости ставятся через uv строго по uv.lock.
 
 pipeline {
     agent {
-        docker {
-            // slim (Debian, glibc), а не alpine: для библиотек вроде pydantic-core
-            // есть готовые сборки (wheels) под glibc, а на alpine (musl) их может не быть,
-            // и pip полезет компилировать Rust-код прямо в сборке.
-            image 'python:3.12-slim'
-        }
+        docker { image 'python:3.12-slim' }
     }
 
     options {
-        timeout(time: 15, unit: 'MINUTES')               // сборка не висит бесконечно
-        timestamps()                                      // время у каждой строки лога (плагин Timestamper)
-        buildDiscarder(logRotator(numToKeepStr: '20'))   // хранить только 20 последних сборок
+        timeout(time: 15, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
     parameters {
@@ -22,41 +16,48 @@ pipeline {
     }
 
     environment {
-        // Контейнер работает от uid 1000, у которого нет своей домашней папки,
-        // поэтому кэш pip кладём в workspace — туда писать можно.
+        // Как и раньше: у uid 1000 нет домашней папки, поэтому все кэши — в workspace
+        UV_CACHE_DIR = '.uv-cache'
         PIP_CACHE_DIR = '.pip-cache'
         PIP_DISABLE_PIP_VERSION_CHECK = '1'
+        // Брать Python из образа, а не скачивать свой
+        UV_PYTHON_DOWNLOADS = 'never'
+        UV_VERSION = '0.11.32'
         NOTIFY_TO = 'me@lab.local'
     }
 
     stages {
-
         stage('Setup') {
             steps {
-                // Каждый sh — отдельный процесс оболочки, поэтому venv не «активируем»,
-                // а вызываем программы из него по полному пути: .venv/bin/...
+                // 1. Ставим сам uv (зафиксированной версии) в отдельное служебное окружение .tools:
+                //    в системный Python пользователю uid 1000 писать нельзя.
+                // 2. uv sync --locked создаёт .venv строго по uv.lock и падает,
+                //    если uv.lock не соответствует pyproject.toml.
+                sh '''
+                    pwd
+                    ls -la
+                    python --version
+                '''
                 sh '''
                     python --version
-                    python -m venv .venv
-                    .venv/bin/pip install -r requirements-dev.txt
+                    python -m venv .tools
+                    .tools/bin/pip install "uv==${UV_VERSION}"
+                    .tools/bin/uv sync --locked
                 '''
             }
         }
-        stage('Lint and Test') {
+
+        stage('Checks') {
             parallel {
                 stage('Lint') {
-                    when {
-                        // != false, а не просто params.RUN_LINT: на самой первой сборке
-                        // параметр может быть ещё не зарегистрирован и прийти как null
-                        expression { params.RUN_LINT != false }
-                    }
+                    when { expression { params.RUN_LINT != false } }
                     steps {
-                        sh '.venv/bin/ruff check .'
+                        sh '.tools/bin/uv run --locked ruff check .'
                     }
                 }
                 stage('Test') {
                     steps {
-                        sh '.venv/bin/python -m pytest -v --junitxml=reports/junit.xml'
+                        sh '.tools/bin/uv run --locked pytest -v --junitxml=reports/junit.xml'
                     }
                 }
             }
@@ -65,7 +66,6 @@ pipeline {
 
     post {
         always {
-            // Отчёт о тестах: в интерфейсе сборки появится раздел Test Result
             junit testResults: 'reports/junit.xml', allowEmptyResults: true
         }
         failure {
