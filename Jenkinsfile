@@ -18,7 +18,7 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    docker --version
+                    curl lab-registry:5000/v2/_catalog
                     '''
                 }
             }
